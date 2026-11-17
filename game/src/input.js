@@ -4,10 +4,12 @@ export class Input {
     this.left = false;
     this.right = false;
     this.any = false;
+    this.pause = false;
     this._handler = (e) => {
       if (e.type === "keydown") {
-        if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") this.left = true;
-        if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") this.right = true;
+        if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") { this.left = true; e.preventDefault(); }
+        if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") { this.right = true; e.preventDefault(); }
+        if (e.key === " " || e.key === "p" || e.key === "P") { this.pause = !this.pause; e.preventDefault(); }
         this.any = true;
       } else if (e.type === "keyup") {
         if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") this.left = false;
@@ -17,5 +19,5 @@ export class Input {
     window.addEventListener("keydown", this._handler);
     window.addEventListener("keyup", this._handler);
   }
-  reset() { this.left = false; this.right = false; this.any = false; }
+  reset() { this.left = false; this.right = false; this.any = false; this.pause = false; }
 }
