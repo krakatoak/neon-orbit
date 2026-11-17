@@ -1,136 +1,179 @@
-// NEON ORBIT - world state & logic
-import { W, H, ORBIT_CX, ORBIT_CY, ORBIT_R, SHIP, ASTEROID, CELL, LIVES, START_LEVEL } from "./config.js";
+// NEON ORBIT — simulation: the star, the ship on its ring, the rocks and the cells.
+import { STAR, SHIP, ASTEROID, CELL, RULES } from "./config.js";
+
+const TAU = Math.PI * 2;
+
+function rand(min, max) {
+  return min + Math.random() * (max - min);
+}
 
 export class World {
   constructor() {
-    this.reset();
-  }
-
-  reset() {
-    this.ang = SHIP.ang;
+    this.state = "title"; // title | play | pause | over
+    this.time = 0;
     this.score = 0;
-    this.lives = LIVES;
-    this.level = START_LEVEL;
-    this.state = "title"; // title | play | over
+    this.lives = RULES.lives;
+    this.level = 1;
+    this.shipAngle = SHIP.startAngle;
+    this.shipVel = 0;
     this.asteroids = [];
     this.cells = [];
-    this.spawnTimer = 1.5;
-    this.cellTimer = 6;
-    this.time = 0;
-    this.levelTimer = 0;
+    this.particles = [];
+    this._rockTimer = ASTEROID.firstSpawn;
+    this._cellTimer = CELL.spawnEvery;
+    this._levelTimer = 0;
+    this._shake = 0;
   }
 
   start() {
     this.state = "play";
+    this.time = 0;
+    this.score = 0;
+    this.lives = RULES.lives;
+    this.level = 1;
+    this.shipAngle = SHIP.startAngle;
+    this.shipVel = 0;
     this.asteroids = [];
     this.cells = [];
-    this.spawnTimer = 1.5;
-    this.cellTimer = 5;
-    this.levelTimer = 0;
+    this.particles = [];
+    this._rockTimer = ASTEROID.firstSpawn;
+    this._cellTimer = CELL.spawnEvery;
+    this._levelTimer = 0;
+    this._shake = 0;
   }
 
-  addAsteroid() {
-    // spawn just outside orbit, aimed inward
-    const a = Math.random() * Math.PI * 2;
-    const r = ORBIT_R + 40 + Math.random() * 40;
-    const ax = ORBIT_CX + Math.cos(a) * r;
-    const ay = ORBIT_CY + Math.sin(a) * r;
-    // velocity toward center-ish
-    const vx = (ORBIT_CX - ax) * 0.02 + (Math.random() - 0.5) * 0.25;
-    const vy = (ORBIT_CY - ay) * 0.02 + (Math.random() - 0.5) * 0.25;
-    const spd = ASTEROID.speedBase + Math.random() * 0.5 + this.level * 0.05;
-    const len = Math.hypot(vx, vy) || 1;
-    this.asteroids.push({
-      x: ax, y: ay,
-      vx: (vx / len) * spd, vy: (vy / len) * spd,
-      r: ASTEROID.radius + Math.random() * 4,
-      rot: Math.random() * 6.28,
-      rspd: (Math.random() - 0.5) * 0.12,
-    });
-  }
-
-  addCell() {
-    const a = Math.random() * Math.PI * 2;
-    const r = ORBIT_R * (0.4 + Math.random() * 0.5);
-    this.cells.push({
-      x: ORBIT_CX + Math.cos(a) * r,
-      y: ORBIT_CY + Math.sin(a) * r,
-      t: Math.random() * 6.28,
-    });
+  togglePause() {
+    if (this.state === "play") this.state = "pause";
+    else if (this.state === "pause") this.state = "play";
   }
 
   update(dt, input) {
+    if (this.state !== "play") return;
     this.time += dt;
+    this._shake = Math.max(0, this._shake - dt * 2.5);
 
-    if (this.state === "play") {
-      // ship movement
-      if (input.left) this.ang -= SHIP.speed * dt * 60 / 60;
-      if (input.right) this.ang += SHIP.speed * dt * 60 / 60;
-      // wrap
-      while (this.ang > Math.PI) this.ang -= Math.PI * 2;
-      while (this.ang < -Math.PI) this.ang += Math.PI * 2;
+    let steer = 0;
+    if (input.left) steer -= 1;
+    if (input.right) steer += 1;
+    this.shipVel += steer * SHIP.accel * dt;
+    this.shipVel -= this.shipVel * SHIP.damping * dt;
+    this.shipAngle = (this.shipAngle + this.shipVel * dt) % TAU;
 
-      const sx = ORBIT_CX + Math.cos(this.ang) * ORBIT_R;
-      const sy = ORBIT_CY + Math.sin(this.ang) * ORBIT_R;
+    this._levelTimer += dt;
+    if (this._levelTimer >= RULES.levelEvery) {
+      this._levelTimer -= RULES.levelEvery;
+      this.level += 1;
+    }
 
-      // spawn asteroids
-      this.spawnTimer -= dt;
-      if (this.spawnTimer <= 0) {
-        this.addAsteroid();
-        this.spawnTimer = Math.max(0.7, ASTEROID.spawnInt - this.level * 0.18) * (0.6 + Math.random() * 0.8);
-      }
-      // spawn cells
-      this.cellTimer -= dt;
-      if (this.cellTimer <= 0) {
-        this.addCell();
-        this.cellTimer = CELL.spawnInt * (0.7 + Math.random() * 0.6);
-      }
+    this._rockTimer -= dt;
+    if (this._rockTimer <= 0) {
+      this._rockTimer = Math.max(ASTEROID.minSpawn, ASTEROID.firstSpawn - this.level * 0.12);
+      this.spawnRock();
+    }
 
-      // move asteroids
-      for (const ast of this.asteroids) {
-        ast.x += ast.vx * dt * 60;
-        ast.y += ast.vy * dt * 60;
-        ast.rot += ast.rspd * dt * 60;
-      }
-      // remove asteroids far off screen
-      this.asteroids = this.asteroids.filter((a) => {
-        return a.x > -40 && a.x < W + 40 && a.y > -40 && a.y < H + 40;
-      });
+    this._cellTimer -= dt;
+    if (this._cellTimer <= 0) {
+      this._cellTimer = CELL.spawnEvery;
+      this.spawnCell();
+    }
 
-      // collision with ship
-      for (let i = this.asteroids.length - 1; i >= 0; i--) {
-        const a = this.asteroids[i];
-        const dx = a.x - sx, dy = a.y - sy;
-        const d = Math.hypot(dx, dy);
-        if (d < a.r + SHIP.radius) {
-          this.asteroids.splice(i, 1);
-          this.lives--;
-          if (this.lives <= 0) {
-            this.state = "over";
-          } else {
-            // brief invulnerability: reset angle
-            this.ang = SHIP.ang;
-          }
-        }
-      }
+    this.stepRocks(dt);
+    this.stepCells();
+    this.stepParticles(dt);
+    this.collide();
+  }
 
-      // collect cells
-      for (let i = this.cells.length - 1; i >= 0; i--) {
-        const c = this.cells[i];
-        const dx = c.x - sx, dy = c.y - sy;
-        if (Math.hypot(dx, dy) < CELL.radius + SHIP.radius) {
-          this.cells.splice(i, 1);
-          this.score += 100;
-        }
-      }
+  spawnRock() {
+    const angle = rand(0, TAU);
+    const reach = Math.max(STAR.x, STAR.y) + 90;
+    const speed = (ASTEROID.baseSpeed + this.level * 0.05) * rand(0.8, 1.3);
+    this.asteroids.push({
+      x: STAR.x + Math.cos(angle) * reach,
+      y: STAR.y + Math.sin(angle) * reach,
+      vx: -Math.cos(angle) * speed,
+      vy: -Math.sin(angle) * speed,
+      r: ASTEROID.radius * rand(0.8, 1.5),
+      rot: rand(0, TAU),
+      spin: rand(-1.5, 1.5),
+    });
+  }
 
-      // level progression
-      this.levelTimer += dt;
-      if (this.levelTimer > 30) {
-        this.level++;
-        this.levelTimer = 0;
-        this.addAsteroid();
+  spawnCell() {
+    const angle = rand(0, TAU);
+    this.cells.push({
+      x: STAR.x + Math.cos(angle) * STAR.ringRadius,
+      y: STAR.y + Math.sin(angle) * STAR.ringRadius,
+      born: this.time,
+    });
+  }
+
+  stepRocks(dt) {
+    for (const rock of this.asteroids) {
+      rock.x += rock.vx * dt * 60;
+      rock.y += rock.vy * dt * 60;
+      rock.rot += rock.spin * dt;
+    }
+    const limit = Math.max(STAR.x, STAR.y) + 150;
+    this.asteroids = this.asteroids.filter(
+      (rock) => Math.hypot(rock.x - STAR.x, rock.y - STAR.y) < limit,
+    );
+  }
+
+  stepCells() {
+    this.cells = this.cells.filter((cell) => this.time - cell.born < CELL.lifetime);
+  }
+
+  stepParticles(dt) {
+    for (const p of this.particles) {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.life -= dt;
+    }
+    this.particles = this.particles.filter((p) => p.life > 0);
+  }
+
+  collide() {
+    const sx = STAR.x + Math.cos(this.shipAngle) * STAR.ringRadius;
+    const sy = STAR.y + Math.sin(this.shipAngle) * STAR.ringRadius;
+
+    for (let i = this.asteroids.length - 1; i >= 0; i--) {
+      const rock = this.asteroids[i];
+      if (Math.hypot(rock.x - sx, rock.y - sy) < rock.r + SHIP.radius) {
+        this.asteroids.splice(i, 1);
+        this.burst(sx, sy, "#ff5a6e");
+        this.lives -= 1;
+        this._shake = 1;
+        if (this.lives <= 0) this.state = "over";
+        return;
       }
     }
+
+    for (let i = this.cells.length - 1; i >= 0; i--) {
+      const cell = this.cells[i];
+      if (Math.hypot(cell.x - sx, cell.y - sy) < CELL.radius + SHIP.radius + 2) {
+        this.cells.splice(i, 1);
+        this.burst(cell.x, cell.y, "#ffe74c");
+        this.score += CELL.score;
+      }
+    }
+  }
+
+  burst(x, y, color) {
+    for (let i = 0; i < 14; i++) {
+      const angle = rand(0, TAU);
+      const speed = rand(40, 180);
+      this.particles.push({
+        x,
+        y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: rand(0.3, 0.7),
+        color,
+      });
+    }
+  }
+
+  get shake() {
+    return this._shake;
   }
 }

@@ -1,23 +1,93 @@
-// NEON ORBIT - keyboard input
+// NEON ORBIT — keyboard state.
+// Holds which keys are down and the edge events (pause, start) the loop consumes.
+
 export class Input {
-  constructor() {
+  constructor(target = window) {
+    this.target = target;
     this.left = false;
     this.right = false;
-    this.any = false;
-    this.pause = false;
-    this._handler = (e) => {
-      if (e.type === "keydown") {
-        if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") { this.left = true; e.preventDefault(); }
-        if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") { this.right = true; e.preventDefault(); }
-        if (e.key === " " || e.key === "p" || e.key === "P") { this.pause = !this.pause; e.preventDefault(); }
-        this.any = true;
-      } else if (e.type === "keyup") {
-        if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") this.left = false;
-        if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") this.right = false;
+    this.pauseHeld = false;
+    this.pausePressed = false;
+    this.anyPressed = false;
+
+    this._onKeyDown = (event) => {
+      if (event.repeat) return;
+      switch (event.key) {
+        case "ArrowLeft":
+        case "a":
+        case "A":
+          this.left = true;
+          break;
+        case "ArrowRight":
+        case "d":
+        case "D":
+          this.right = true;
+          break;
+        case " ":
+        case "p":
+        case "P":
+          this.pauseHeld = !this.pauseHeld;
+          this.pausePressed = true;
+          break;
+        default:
+          return;
+      }
+      // Keep the page from scrolling when the arrows or space bar are used.
+      event.preventDefault();
+      this.anyPressed = true;
+    };
+
+    this._onKeyUp = (event) => {
+      switch (event.key) {
+        case "ArrowLeft":
+        case "a":
+        case "A":
+          this.left = false;
+          break;
+        case "ArrowRight":
+        case "d":
+        case "D":
+          this.right = false;
+          break;
       }
     };
-    window.addEventListener("keydown", this._handler);
-    window.addEventListener("keyup", this._handler);
+
+    target.addEventListener("keydown", this._onKeyDown);
+    target.addEventListener("keyup", this._onKeyUp);
+    this._onBlur = () => this.clear();
+    target.addEventListener("blur", this._onBlur);
   }
-  reset() { this.left = false; this.right = false; this.any = false; this.pause = false; }
+
+  // Edge events are consumed once per frame by the game loop.
+  consumePause() {
+    const pressed = this.pausePressed;
+    this.pausePressed = false;
+    return pressed;
+  }
+
+  consumeAny() {
+    const pressed = this.anyPressed;
+    this.anyPressed = false;
+    return pressed;
+  }
+
+  releaseAll() {
+    this.left = false;
+    this.right = false;
+    this.anyPressed = false;
+    this.pausePressed = false;
+  }
+
+  // Forget the pause toggle too, so a lost focus cannot leave it stuck.
+  clear() {
+    this.releaseAll();
+    this.pauseHeld = false;
+  }
+
+  destroy() {
+    this.target.removeEventListener("keydown", this._onKeyDown);
+    this.target.removeEventListener("keyup", this._onKeyUp);
+    this.target.removeEventListener("blur", this._onBlur);
+    this.releaseAll();
+  }
 }

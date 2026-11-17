@@ -1,57 +1,43 @@
-// NEON ORBIT - entry point & game loop
-import { W, H } from "./config.js";
+// NEON ORBIT — bootstrap and frame loop.
+import { VIEW } from "./config.js";
 import { Input } from "./input.js";
 import { World } from "./world.js";
-import { draw, drawShip, drawAsteroid, drawCell, drawText, drawHUD } from "./render.js";
+import { drawFrame, drawTitle, drawPause, drawOver } from "./render.js";
 
-const canvas = document.getElementById("game");
+const canvas = document.getElementById("screen");
 const ctx = canvas.getContext("2d");
-canvas.width = W;
-canvas.height = H;
+canvas.width = VIEW.width;
+canvas.height = VIEW.height;
 
-const input = new Input();
+const input = new Input(window);
 const world = new World();
 
-let last = performance.now();
+// A testing handle: the screenshot harness drives the page through this.
+window.__neonOrbit = { world, input };
 
-function loop(now) {
-  const dt = Math.min((now - last) / 1000, 0.05);
-  last = now;
+let previous = performance.now();
+
+function frame(now) {
+  const dt = Math.min((now - previous) / 1000, 0.05);
+  previous = now;
+
+  if (input.consumePause()) {
+    if (world.state === "play" || world.state === "pause") world.togglePause();
+  }
+
+  if (input.consumeAny() && (world.state === "title" || world.state === "over")) {
+    world.start();
+  }
 
   world.update(dt, input);
 
-  draw(ctx);
+  drawFrame(ctx, world);
+  if (world.state === "title") drawTitle(ctx);
+  if (world.state === "pause") drawPause(ctx);
+  if (world.state === "over") drawOver(ctx, world);
 
-  if (world.state === "title") {
-    drawText(ctx, "NEON ORBIT", W / 2, 130, 34, "#00f0ff");
-    drawText(ctx, "keep your satellite on the ring", W / 2, 180, 13, "#9a8fc0");
-    drawText(ctx, "left/right or A/D to move", W / 2, 480, 15, "#e8e0f8");
-    drawText(ctx, "catch yellow cells for score", W / 2, 505, 13, "#ffe74c");
-    drawText(ctx, "avoid the asteroids", W / 2, 528, 13, "#ff5a6e");
-    drawText(ctx, "press any key to start", W / 2, 575, 18, "#ffffff", );
-    // preview ship
-    drawShip(ctx, -Math.PI / 2);
-    if (input.any) {
-      input.reset();
-      world.start();
-    }
-  } else if (world.state === "play") {
-    drawShip(ctx, world.ang);
-    for (const a of world.asteroids) drawAsteroid(ctx, a.x, a.y, a.r, a.rot);
-    for (const c of world.cells) drawCell(ctx, c.x, c.y, world.time);
-    drawHUD(ctx, world.score, world.lives, world.level);
-  } else if (world.state === "over") {
-    drawText(ctx, "GAME OVER", W / 2, 220, 40, "#ff5a6e");
-    drawText(ctx, `score ${world.score}  level ${world.level}`, W / 2, 280, 20, "#e8e0f8");
-    drawText(ctx, "press any key to restart", W / 2, 480, 16, "#ffffff");
-    if (input.any) {
-      input.reset();
-      world.reset();
-      world.start();
-    }
-  }
-
-  requestAnimationFrame(loop);
+  input.releaseAll();
+  requestAnimationFrame(frame);
 }
 
-requestAnimationFrame(loop);
+requestAnimationFrame(frame);
